@@ -2,11 +2,12 @@ import React, { useState, useEffect } from "react";
 import {
   collection,
   addDoc,
-  getDocs,
   deleteDoc,
   doc,
-  orderBy,
+  onSnapshot,
   query,
+  orderBy,
+  serverTimestamp,
 } from "firebase/firestore";
 import { db } from "./firebase";
 
@@ -16,51 +17,63 @@ const App = () => {
   const [notes, setnotes] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // 🔄 Fetch notes from Firestore
-  const fetchNotes = async () => {
-    const q = query(collection(db, "notes"), orderBy("createdAt", "desc"));
-    const querySnapshot = await getDocs(q);
-
-    const notesData = querySnapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
-
-    setnotes(notesData);
-    setLoading(false);
-  };
-
+  // 🔄 REALTIME LISTENER
   useEffect(() => {
-    fetchNotes();
+    const q = query(
+      collection(db, "notes"),
+      orderBy("createdAt", "desc")
+    );
+
+    const unsubscribe = onSnapshot(
+      q,
+      (snapshot) => {
+        const notesData = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        setnotes(notesData);
+        setLoading(false);
+      },
+      (error) => {
+        console.error("Realtime error:", error);
+        setLoading(false);
+      }
+    );
+
+    // cleanup listener on unmount
+    return () => unsubscribe();
   }, []);
 
-  // ➕ Add note
+  // ➕ ADD NOTE
   const addNote = async (e) => {
     e.preventDefault();
-    if (title.trim() === "" && content.trim() === "") return;
+    if (!title.trim() && !content.trim()) return;
 
     await addDoc(collection(db, "notes"), {
       title,
       content,
-      createdAt: new Date(),
+      createdAt: serverTimestamp(),
     });
 
     settitle("");
     setcontent("");
-    fetchNotes();
   };
 
-  // ❌ Delete note
+  // ❌ DELETE NOTE
   const deleteNote = async (id) => {
-    await deleteDoc(doc(db, "notes", id));
-    setnotes(notes.filter((note) => note.id !== id));
+    try {
+      await deleteDoc(doc(db, "notes", id));
+    } catch (error) {
+      console.error("Delete failed:", error);
+      alert("Delete failed. Check Firestore rules.");
+    }
   };
 
   return (
     <div className="min-h-screen bg-black overflow-auto text-white">
       <div className="flex flex-col lg:flex-row justify-between">
 
-        {/* LEFT SECTION - FORM */}
+        {/* LEFT SECTION */}
         <div className="w-full lg:w-3/5">
           <form
             onSubmit={addNote}
@@ -87,7 +100,7 @@ const App = () => {
           </form>
         </div>
 
-        {/* RIGHT SECTION - NOTES */}
+        {/* RIGHT SECTION */}
         <div className="w-full lg:w-2/5 lg:border-l-2 border-gray-600 min-h-screen overflow-auto">
           {loading && (
             <p className="p-4 text-gray-400">Loading notes...</p>
@@ -105,6 +118,7 @@ const App = () => {
               <h2 className="text-xl font-bold mb-2">
                 {note.title || "Untitled"}
               </h2>
+
               <p className="whitespace-pre-wrap">{note.content}</p>
 
               <button
